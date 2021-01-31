@@ -1,9 +1,17 @@
 package com.lilaksoft.digisellgateway;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.Optional;
+import org.apache.http.protocol.HTTP;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
@@ -14,6 +22,7 @@ public class JwtOffloadFilterFactory
     extends AbstractGatewayFilterFactory<JwtOffloadFilterFactory.Config> {
 
   private static final String HEADER_STRING = "Authorization";
+  private static final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
 
   public JwtOffloadFilterFactory() {
     super(Config.class);
@@ -33,13 +42,34 @@ public class JwtOffloadFilterFactory
       if (Optional.ofNullable(token).isEmpty() || token.isEmpty()) {
         return this.onError(exchange, "No Authorization header", HttpStatus.UNAUTHORIZED);
       }
-      boolean authorized = false;
-      //TODO call authentication micro service to check the validity of JWT token
+      //call authentication micro service to check the validity of JWT token
+      HttpRequest authRequest = HttpRequest.newBuilder(URI.create("http://localhost:8081/users/userref"))
+          .header(HEADER_STRING, token)
+            .GET().build();
+      HttpResponse.BodyHandler<String> bodyHandler = HttpResponse.BodyHandlers.ofString();
+      String userRef = "";
 
-      if (!authorized) {
-        return this.onError(exchange, "Token invalid", HttpStatus.UNAUTHORIZED);
+      try {
+        HttpResponse<String> response = client.send(authRequest, bodyHandler);
+        if(response.statusCode() != HttpStatus.OK.value()) {
+          return this.onError(exchange, "Token invalid", HttpStatus.UNAUTHORIZED);
+        }
+        userRef = response.body();
+
+        if(userRef.isEmpty()){
+          return this.onError(exchange, "user reference couldn't been retrieved", HttpStatus.UNAUTHORIZED);
+        }
+
+      } catch (IOException | InterruptedException e) {
+        e.printStackTrace();
       }
-      return chain.filter(exchange).then(Mono.fromRunnable(() -> {
+      ServerHttpRequest request = exchange.getRequest()
+          .mutate()
+          .header("userRef", userRef)
+          .build();
+      ServerWebExchange intervenedExchange = exchange.mutate().request(request).build();
+
+      return chain.filter(intervenedExchange).then(Mono.fromRunnable(() -> {
         System.out.println("First post filter");
       }));
     };
