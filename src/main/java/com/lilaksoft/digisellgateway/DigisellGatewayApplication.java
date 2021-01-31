@@ -15,31 +15,44 @@ import reactor.core.publisher.Mono;
 @RestController
 public class DigisellGatewayApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(DigisellGatewayApplication.class, args);
-	}
+  public static void main(String[] args) {
+    SpringApplication.run(DigisellGatewayApplication.class, args);
+  }
 
-	@Bean
-	public RouteLocator myRoutes(RouteLocatorBuilder builder, UriConfiguration uriConfiguration) {
-		String httpUri = uriConfiguration.getHttpbin();
-		return builder.routes()
-				.route(p -> p
-						.path("/get")
-						.filters(f -> f.addRequestHeader("Hello", "World"))
-						.uri(httpUri))
-				.route(p -> p
-						.host("*.hystrix.com")
-						.filters(f -> f
-								.hystrix(config -> config
-										.setName("mycmd")
-										.setFallbackUri("forward:/fallback")))
-						.uri(httpUri))
-				.build();
-	}
+  @Bean
+  public RouteLocator myRoutes(RouteLocatorBuilder builder,
+                               JwtOffloadFilterFactory jwtOffloadFilterFactory,
+                               UriConfiguration uriConfiguration) {
+    String httpUri = uriConfiguration.getHttpbin();
+    String coreApiUtl = uriConfiguration.getCoreApiUrl();
+    return builder.routes()
+        .route(p -> p
+            .path("/get")
+            .filters(f -> f.addRequestHeader("Hello", "World"))
+            .uri(httpUri))
+        //.route("api", r -> r.path("/api")
+        //		.filters(f -> f.filter(new JwtOffloadCustomFilter()))
+        //		.uri(coreApiUtl))
+        .route("api", r -> r.path("/api/**")
+            .filters(f -> f.filter(jwtOffloadFilterFactory.apply(new JwtOffloadFilterFactory.Config())))
+            .uri(coreApiUtl))
+        .route("authentication", r -> r.path("/users")
+            .filters(f -> f.addRequestHeader("Hello", "World"))
+            .uri(coreApiUtl))
+        .route(p -> p
+            .host("*.hystrix.com")
+            .filters(f -> f
+                .hystrix(config -> config
+                    .setName("mycmd")
+                    .setFallbackUri("forward:/fallback")))
+            .uri(httpUri))
+        //.route(r -> r.path("/api").filters(f -> ))
+        .build();
+  }
 
-	@RequestMapping("/fallback")
-	public Mono<String> fallback() {
-		return Mono.just("fallback");
-	}
+  @RequestMapping("/fallback")
+  public Mono<String> fallback() {
+    return Mono.just("fallback");
+  }
 
 }
